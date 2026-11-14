@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>積乱雲空ペインターキャンバス</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+<div class="max-w-4xl mx-auto p-4">
+  <h1 class="text-2xl font-bold text-center text-sky-400 mb-1">☁️ 積乱雲 空ペインター</h1>
+  <p class="text-center text-gray-400 text-sm mb-4">クリック&ドラッグで雲を描く — 時間帯で空が変化</p>
+
+  <div class="bg-gray-900 rounded-xl p-3 mb-3">
+    <div class="flex flex-wrap gap-2 items-center justify-between">
+      <div class="flex gap-2 flex-wrap">
+        <button onclick="setTime('dawn')" class="time-btn px-3 py-1 rounded-lg text-sm font-semibold transition bg-orange-900 hover:bg-orange-700">🌅 日出</button>
+        <button onclick="setTime('day')" class="time-btn px-3 py-1 rounded-lg text-sm font-semibold transition bg-sky-800 hover:bg-sky-600">☀️ 昼</button>
+        <button onclick="setTime('sunset')" class="time-btn px-3 py-1 rounded-lg text-sm font-semibold transition bg-red-900 hover:bg-red-700">🌇 夕焼け</button>
+        <button onclick="setTime('night')" class="time-btn px-3 py-1 rounded-lg text-sm font-semibold transition bg-indigo-900 hover:bg-indigo-700">🌙 夜</button>
+      </div>
+      <div class="flex gap-2 flex-wrap">
+        <button onclick="setCloudType('cumulus')" class="cloud-btn px-3 py-1 rounded-lg text-sm transition bg-gray-700 hover:bg-gray-600">⛅ 積雲</button>
+        <button onclick="setCloudType('cirrus')" class="cloud-btn px-3 py-1 rounded-lg text-sm transition bg-gray-700 hover:bg-gray-600">🌁 巻雲</button>
+        <button onclick="setCloudType('stratus')" class="cloud-btn px-3 py-1 rounded-lg text-sm transition bg-gray-700 hover:bg-gray-600">🌫 層雲</button>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="clearClouds()" class="px-3 py-1 rounded-lg text-sm bg-gray-700 hover:bg-gray-600 transition">🗑 クリア</button>
+        <button onclick="downloadPNG()" class="px-3 py-1 rounded-lg text-sm bg-gray-700 hover:bg-gray-600 transition">⬇ PNG</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-gray-900 rounded-xl overflow-hidden">
+    <canvas id="canvas" width="700" height="420" class="w-full cursor-crosshair" style="touch-action:none;" role="img" aria-label="空ペインターキャンバス"></canvas>
+  </div>
+
+  <div class="mt-2 text-center text-xs text-gray-500">クリック or ドラッグで雲を追加 | 右クリックで削除</div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const W = 700, H = 420;
+
+let timeOfDay = 'day';
+let cloudType = 'cumulus';
+let clouds = [];
+let isDrawing = false;
+let lastX = 0, lastY = 0;
+
+const SKIES = {
+  dawn:   { top:'#1a0533', mid:'#8b2252', bot:'#ff7043', ground:'#4a1a0a' },
+  day:    { top:'#0277bd', mid:'#0288d1', bot:'#b3e5fc', ground:'#2d5a1b' },
+  sunset: { top:'#1a237e', mid:'#c62828', bot:'#ff8f00', ground:'#1b0000' },
+  night:  { top:'#000010', mid:'#0a0a2e', bot:'#1a1a4e', ground:'#0a0a0a' },
+};
+
+const CLOUD_COLORS = {
+  dawn:   ['rgba(255,180,140,', 'rgba(255,140,100,', 'rgba(220,120,80,'],
+  day:    ['rgba(255,255,255,', 'rgba(240,248,255,', 'rgba(220,235,245,'],
+  sunset: ['rgba(255,160,100,', 'rgba(255,100,80,', 'rgba(200,80,60,'],
+  night:  ['rgba(80,80,120,', 'rgba(60,60,100,', 'rgba(40,40,80,'],
+};
+
+function setTime(t) { timeOfDay = t; redraw(); }
+function setCloudType(t) { cloudType = t; }
+
+function drawSky() {
+  const sky = SKIES[timeOfDay];
+  const grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0, sky.top);
+  grad.addColorStop(0.5, sky.mid);
+  grad.addColorStop(0.85, sky.bot);
+  grad.addColorStop(1, sky.ground);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,W,H);
+
+  // Stars at night/dawn
+  if (timeOfDay === 'night' || timeOfDay === 'dawn') {
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    for (let i=0;i<80;i++) {
+      const sx = (i*137.5)%W, sy = (i*79.3)%(H*0.6);
+      const size = i%5===0 ? 1.5 : 0.8;
+      ctx.fillRect(sx, sy, size, size);
+    }
+  }
+
+  // Sun/Moon
+  if (timeOfDay === 'day') {
+    const sunGrad = ctx.createRadialGradient(580,80,0,580,80,50);
+    sunGrad.addColorStop(0,'rgba(255,255,180,1)');
+    sunGrad.addColorStop(0.3,'rgba(255,220,50,0.8)');
+    sunGrad.addColorStop(1,'rgba(255,200,0,0)');
+    ctx.fillStyle = sunGrad;
+    ctx.fillRect(530,30,100,100);
+  } else if (timeOfDay === 'dawn') {
+    const sunGrad = ctx.createRadialGradient(100,H*0.7,0,100,H*0.7,80);
+    sunGrad.addColorStop(0,'rgba(255,220,100,1)');
+    sunGrad.addColorStop(0.4,'rgba(255,120,0,0.6)');
+    sunGrad.addColorStop(1,'rgba(255,60,0,0)');
+    ctx.fillStyle = sunGrad;
+    ctx.fillRect(20,H*0.6-80,160,160);
+  } else if (timeOfDay === 'night') {
+    ctx.beginPath();
+    ctx.arc(80,80,25,0,Math.PI*2);
+    ctx.fillStyle = '#fffde7';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(93,72,22,0,Math.PI*2);
+    ctx.fillStyle = SKIES.night.top;
+    ctx.fill();
+  }
+}
+
+function drawCloud(c) {
+  const colors = CLOUD_COLORS[timeOfDay];
+  if (c.type === 'cumulus') {
+    drawCumulus(c.x, c.y, c.size, colors);
+  } else if (c.type === 'cirrus') {
+    drawCirrus(c.x, c.y, c.size, colors);
+  } else {
+    drawStratus(c.x, c.y, c.size, colors);
+  }
+}
+
+function drawCumulus(x, y, size, colors) {
+  const puffs = [
+    {ox:0, oy:0, r:size},
+    {ox:-size*0.6, oy:size*0.3, r:size*0.75},
+    {ox:size*0.6, oy:size*0.3, r:size*0.75},
+    {ox:-size*0.3, oy:size*0.5, r:size*0.6},
+    {ox:size*0.3, oy:size*0.5, r:size*0.6},
+    {ox:0, oy:size*0.6, r:size*0.5},
+    {ox:-size*0.9, oy:size*0.6, r:size*0.5},
+    {ox:size*0.9, oy:size*0.6, r:size*0.5},
+  ];
+  puffs.forEach((p, i) => {
+    const alpha = 0.6 - i*0.03;
+    const grad = ctx.createRadialGradient(x+p.ox, y+p.oy-p.r*0.2, p.r*0.1, x+p.ox, y+p.oy, p.r);
+    grad.addColorStop(0, colors[0]+(alpha+0.2)+')');
+    grad.addColorStop(0.5, colors[1]+alpha+')');
+    grad.addColorStop(1, colors[2]+(alpha*0.3)+')');
+    ctx.beginPath();
+    ctx.arc(x+p.ox, y+p.oy, p.r, 0, Math.PI*2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+  });
+}
+
+function drawCirrus(x, y, size, colors) {
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  for (let i=0;i<6;i++) {
+    const ox = (i-3)*size*0.4;
+    const oy = Math.sin(i/5*Math.PI)*size*0.3;
+    ctx.beginPath();
+    ctx.moveTo(x+ox-size, y+oy);
+    ctx.bezierCurveTo(x+ox-size/2, y+oy-size*0.3, x+ox+size/2, y+oy-size*0.1, x+ox+size, y+oy+size*0.2);
+    ctx.strokeStyle = colors[0]+'0.7)';
+    ctx.lineWidth = size*0.15;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawStratus(x, y, size, colors) {
+  const grad = ctx.createRadialGradient(x, y, size*0.1, x, y, size*2.5);
+  grad.addColorStop(0, colors[0]+'0.5)');
+  grad.addColorStop(0.4, colors[1]+'0.4)');
+  grad.addColorStop(1, colors[2]+'0)');
+  ctx.beginPath();
+  ctx.ellipse(x, y, size*2.5, size*0.5, 0, 0, Math.PI*2);
+  ctx.fillStyle = grad;
+  ctx.fill();
+}
+
+function redraw() {
+  drawSky();
+  clouds.forEach(c => drawCloud(c));
+}
+
+function getCanvasPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = W/rect.width, scaleY = H/rect.height;
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  return [(clientX-rect.left)*scaleX, (clientY-rect.top)*scaleY];
+}
+
+canvas.addEventListener('mousedown', e => {
+  if (e.button === 2) {
+    const [mx,my] = getCanvasPos(e);
+    clouds = clouds.filter(c => Math.hypot(mx-c.x,my-c.y) > c.size*1.2);
+    redraw(); return;
+  }
+  isDrawing = true;
+  const [mx,my] = getCanvasPos(e);
+  lastX = mx; lastY = my;
+  clouds.push({x:mx, y:my, size:30+Math.random()*20, type:cloudType});
+  redraw();
+});
+
+canvas.addEventListener('mousemove', e => {
+  if (!isDrawing) return;
+  const [mx,my] = getCanvasPos(e);
+  const dist = Math.hypot(mx-lastX, my-lastY);
+  if (dist > 25) {
+    clouds.push({x:mx, y:my, size:25+Math.random()*20, type:cloudType});
+    lastX = mx; lastY = my;
+    redraw();
+  }
+});
+
+canvas.addEventListener('mouseup', () => { isDrawing = false; });
+canvas.addEventListener('mouseleave', () => { isDrawing = false; });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  isDrawing = true;
+  const [mx,my] = getCanvasPos(e);
+  lastX = mx; lastY = my;
+  clouds.push({x:mx, y:my, size:30+Math.random()*20, type:cloudType});
+  redraw();
+}, {passive:false});
+
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (!isDrawing) return;
+  const [mx,my] = getCanvasPos(e);
+  const dist = Math.hypot(mx-lastX, my-lastY);
+  if (dist > 20) {
+    clouds.push({x:mx, y:my, size:25+Math.random()*20, type:cloudType});
+    lastX = mx; lastY = my;
+    redraw();
+  }
+}, {passive:false});
+
+canvas.addEventListener('touchend', () => { isDrawing = false; });
+
+function clearClouds() { clouds = []; redraw(); }
+function downloadPNG() {
+  const a = document.createElement('a');
+  a.href = canvas.toDataURL('image/png');
+  a.download = 'sky-painting.png';
+  a.click();
+}
+
+redraw();
+</script>
+</body>
+</html>
